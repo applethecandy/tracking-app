@@ -18,6 +18,7 @@ class PngExportController extends Controller
                 'id' => $trackRoute->id,
                 'title' => $trackRoute->title,
                 'activity_date' => $trackRoute->activity_date->format('Y-m-d'),
+                'duration_minutes' => $trackRoute->duration_minutes,
                 'activity_type' => $trackRoute->activity_type,
                 'activity_label' => $trackRoute->activity_label,
                 'comment' => $trackRoute->comment,

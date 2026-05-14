@@ -62,7 +62,7 @@ defineProps<{
                         </div>
                         <div class="h-64 rounded bg-[linear-gradient(135deg,#dbeafe_0%,#f8fafc_45%,#ccfbf1_100%)] p-4">
                             <svg viewBox="0 0 360 220" class="h-full w-full">
-                                <path d="M22 174 C 76 154, 98 66, 160 86 S 220 176, 336 44" fill="none" stroke="#0f766e" stroke-width="8" stroke-linecap="round" />
+                                <path d="M22 174 C 76 154, 98 66, 160 86 S 220 176, 336 44" fill="none" stroke="#2563eb" stroke-width="8" stroke-linecap="round" />
                                 <circle cx="22" cy="174" r="10" fill="#16a34a" stroke="#fff" stroke-width="4" />
                                 <circle cx="336" cy="44" r="10" fill="#dc2626" stroke="#fff" stroke-width="4" />
                             </svg>

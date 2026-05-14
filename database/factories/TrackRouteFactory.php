@@ -20,6 +20,7 @@ class TrackRouteFactory extends Factory
             'user_id' => User::factory(),
             'title' => $this->faker->sentence(3),
             'activity_date' => $this->faker->date(),
+            'duration_minutes' => null,
             'activity_type' => 'walk',
             'comment' => $this->faker->optional()->sentence(),
             'points' => [

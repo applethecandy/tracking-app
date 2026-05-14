@@ -130,6 +130,7 @@ class TrackRouteController extends Controller
         return $request->validate([
             'title' => ['required', 'string', 'max:255'],
             'activity_date' => ['required', 'date'],
+            'duration_minutes' => ['nullable', 'integer', 'min:1', 'max:10080'],
             'activity_type' => ['required', Rule::in(array_keys(TrackRoute::ACTIVITIES))],
             'comment' => ['nullable', 'string'],
             'is_shared' => ['boolean'],
@@ -146,6 +147,7 @@ class TrackRouteController extends Controller
             'id' => $route->id,
             'title' => $route->title,
             'activity_date' => $route->activity_date->format('Y-m-d'),
+            'duration_minutes' => $route->duration_minutes,
             'activity_type' => $route->activity_type,
             'activity_label' => $route->activity_label,
             'comment' => $route->comment,

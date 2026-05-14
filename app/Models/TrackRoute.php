@@ -21,6 +21,7 @@ class TrackRoute extends Model
         'user_id',
         'title',
         'activity_date',
+        'duration_minutes',
         'activity_type',
         'comment',
         'points',
@@ -33,6 +34,7 @@ class TrackRoute extends Model
 
     protected $casts = [
         'activity_date' => 'date:Y-m-d',
+        'duration_minutes' => 'integer',
         'points' => 'array',
         'is_shared' => 'boolean',
     ];

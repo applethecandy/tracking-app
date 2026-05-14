@@ -10,6 +10,7 @@ export type TrackRoute = {
     id: number;
     title: string;
     activity_date: string;
+    duration_minutes: number | null;
     activity_type: string;
     activity_label: string;
     comment: string | null;

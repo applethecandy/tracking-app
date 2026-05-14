@@ -19,6 +19,7 @@ const props = defineProps<{
 const form = useForm({
     title: props.routeModel?.title ?? '',
     activity_date: props.routeModel?.activity_date ?? new Date().toISOString().slice(0, 10),
+    duration_minutes: props.routeModel?.duration_minutes?.toString() ?? '',
     activity_type: props.routeModel?.activity_type ?? 'walk',
     comment: props.routeModel?.comment ?? '',
     is_shared: props.routeModel?.is_shared ?? false,
@@ -86,6 +87,20 @@ const submit = () => {
                 </div>
 
                 <div>
+                    <InputLabel for="duration_minutes" value="Время в пути, минут" />
+                    <TextInput
+                        id="duration_minutes"
+                        v-model="form.duration_minutes"
+                        type="number"
+                        min="1"
+                        max="10080"
+                        class="mt-1 block w-full"
+                        placeholder="Необязательно"
+                    />
+                    <InputError :message="form.errors.duration_minutes" class="mt-2" />
+                </div>
+
+                <div>
                     <InputLabel for="activity_type" value="Активность" />
                     <select
                         id="activity_type"
@@ -146,7 +161,7 @@ const submit = () => {
             </section>
 
             <section>
-                <RouteMap :points="form.points" editable @update:points="setPoints" />
+                <RouteMap :points="form.points" editable show-intermediate-markers @update:points="setPoints" />
             </section>
         </form>
     </AuthenticatedLayout>

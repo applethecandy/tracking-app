@@ -25,6 +25,7 @@ class TrackRouteTest extends TestCase
         $response = $this->actingAs($user)->post(route('routes.store'), [
             'title' => 'Evening skate',
             'activity_date' => '2026-05-14',
+            'duration_minutes' => 90,
             'activity_type' => 'skateboard',
             'comment' => 'Dry asphalt.',
             'is_shared' => true,
@@ -41,6 +42,7 @@ class TrackRouteTest extends TestCase
         $this->assertSame('skateboard', $route->activity_type);
         $this->assertTrue($route->is_shared);
         $this->assertNotNull($route->share_token);
+        $this->assertSame(90, $route->duration_minutes);
         $this->assertGreaterThan(0, $route->distance_m);
         $this->assertSame(24, $route->elevation_gain_m);
         $this->assertEquals(10.0, $route->points[0]['ele']);

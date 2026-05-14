@@ -7,9 +7,11 @@ const props = withDefaults(
     defineProps<{
         points: RoutePoint[];
         editable?: boolean;
+        showIntermediateMarkers?: boolean;
     }>(),
     {
         editable: false,
+        showIntermediateMarkers: false,
     },
 );
 
@@ -60,6 +62,11 @@ onMounted(async () => {
         maxZoom: 17,
     });
 
+    const cartoNoLabels = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+        maxZoom: 19,
+    });
+
     const imagery = L.tileLayer(
         'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
         {
@@ -84,7 +91,14 @@ onMounted(async () => {
     const hybrid = L.layerGroup([imagery, hybridTransportation, hybridLabels]);
 
     osm.addTo(map);
-    L.control.layers({ OSM: osm, 'OSM HOT': hot, 'Топо': topo, 'Спутник': imagery, 'Спутник гибрид': hybrid }).addTo(map);
+    L.control.layers({
+        OSM: osm,
+        'OSM HOT': hot,
+        'Топо': topo,
+        'Скриншот': cartoNoLabels,
+        'Спутник': imagery,
+        'Спутник гибрид': hybrid,
+    }).addTo(map);
     addGeolocationControl();
 
     if (props.editable) {
@@ -150,16 +164,22 @@ const renderRoute = () => {
     const latLngs = props.points.map((point) => [point.lat, point.lng] as LatLngExpression);
 
     line = L.polyline(latLngs, {
-        color: '#0f766e',
+        color: '#2563eb',
         weight: 5,
         opacity: 0.9,
     }).addTo(map);
 
     props.points.forEach((point, index) => {
+        const isEndpoint = index === 0 || index === props.points.length - 1;
+
+        if (!props.showIntermediateMarkers && !isEndpoint) {
+            return;
+        }
+
         const marker = L.circleMarker([point.lat, point.lng], {
-            radius: index === 0 || index === props.points.length - 1 ? 7 : 5,
+            radius: isEndpoint ? 7 : 5,
             color: '#ffffff',
-            fillColor: index === 0 ? '#16a34a' : index === props.points.length - 1 ? '#dc2626' : '#0f766e',
+            fillColor: index === 0 ? '#16a34a' : index === props.points.length - 1 ? '#dc2626' : '#2563eb',
             fillOpacity: 1,
             weight: 2,
         }).addTo(map!);

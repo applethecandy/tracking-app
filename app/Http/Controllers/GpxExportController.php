@@ -42,15 +42,25 @@ class GpxExportController extends Controller
         $name = htmlspecialchars($route->title, ENT_XML1 | ENT_COMPAT, 'UTF-8');
         $date = $route->activity_date->format('Y-m-d');
 
-        $points = collect($route->points)->map(function (array $point): string {
-            $lat = number_format((float) $point['lat'], 7, '.', '');
-            $lng = number_format((float) $point['lng'], 7, '.', '');
-            $ele = isset($point['ele'])
-                ? '<ele>'.htmlspecialchars((string) $point['ele'], ENT_XML1 | ENT_COMPAT, 'UTF-8').'</ele>'
-                : '';
+        $segments = $this->segments($route->points)
+            ->map(function (array $segment): string {
+                $points = collect($segment)->map(function (array $point): string {
+                    $lat = number_format((float) $point['lat'], 7, '.', '');
+                    $lng = number_format((float) $point['lng'], 7, '.', '');
+                    $ele = isset($point['ele'])
+                        ? '<ele>'.htmlspecialchars((string) $point['ele'], ENT_XML1 | ENT_COMPAT, 'UTF-8').'</ele>'
+                        : '';
 
-            return "      <trkpt lat=\"{$lat}\" lon=\"{$lng}\">{$ele}</trkpt>";
-        })->implode("\n");
+                    return "      <trkpt lat=\"{$lat}\" lon=\"{$lng}\">{$ele}</trkpt>";
+                })->implode("\n");
+
+                return <<<GPX
+    <trkseg>
+{$points}
+    </trkseg>
+GPX;
+            })
+            ->implode("\n");
 
         return <<<GPX
 <?xml version="1.0" encoding="UTF-8"?>
@@ -62,11 +72,31 @@ class GpxExportController extends Controller
   <trk>
     <name>{$name}</name>
     <type>{$route->activity_type}</type>
-    <trkseg>
-{$points}
-    </trkseg>
+{$segments}
   </trk>
 </gpx>
 GPX;
+    }
+
+    private function segments(array $points): \Illuminate\Support\Collection
+    {
+        return collect($points)->reduce(function (\Illuminate\Support\Collection $segments, array $point) {
+            $segment = (int) ($point['segment'] ?? 0);
+            $last = $segments->last();
+
+            if ($last === null || $last['segment'] !== $segment) {
+                $segments->push([
+                    'segment' => $segment,
+                    'points' => [$point],
+                ]);
+
+                return $segments;
+            }
+
+            $last['points'][] = $point;
+            $segments->put($segments->count() - 1, $last);
+
+            return $segments;
+        }, collect())->map(fn (array $segment) => $segment['points']);
     }
 }

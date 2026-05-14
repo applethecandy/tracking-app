@@ -14,10 +14,34 @@ export const calculateDistance = (points: RoutePoint[]): number => {
     let distance = 0;
 
     for (let index = 1; index < points.length; index += 1) {
+        if (pointSegment(points[index - 1]) !== pointSegment(points[index])) {
+            continue;
+        }
+
         distance += distanceBetween(points[index - 1], points[index]);
     }
 
     return Math.round(distance);
+};
+
+export const pointSegment = (point: RoutePoint): number => point.segment ?? 0;
+
+export const routeSegments = (points: RoutePoint[]): RoutePoint[][] => {
+    const segments: RoutePoint[][] = [];
+
+    points.forEach((point) => {
+        const segment = pointSegment(point);
+        const current = segments.at(-1);
+
+        if (!current || pointSegment(current[0]) !== segment) {
+            segments.push([point]);
+            return;
+        }
+
+        current.push(point);
+    });
+
+    return segments;
 };
 
 const distanceBetween = (from: RoutePoint, to: RoutePoint): number => {

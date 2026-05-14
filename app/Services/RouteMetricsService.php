@@ -27,6 +27,10 @@ class RouteMetricsService
             $previous = $points[$i - 1];
             $current = $points[$i];
 
+            if ($this->pointSegment($previous) !== $this->pointSegment($current)) {
+                continue;
+            }
+
             $distance += $this->distanceBetween($previous, $current);
 
             if (isset($previous['ele'], $current['ele'])) {
@@ -79,6 +83,11 @@ class RouteMetricsService
         }
 
         return $points;
+    }
+
+    private function pointSegment(array $point): int
+    {
+        return (int) ($point['segment'] ?? 0);
     }
 
     private function distanceBetween(array $from, array $to): float

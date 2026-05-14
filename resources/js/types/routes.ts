@@ -4,6 +4,7 @@ export type RoutePoint = {
     lat: number;
     lng: number;
     ele?: number | null;
+    segment?: number | null;
 };
 
 export type TrackRoute = {

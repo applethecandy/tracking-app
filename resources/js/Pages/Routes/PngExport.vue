@@ -3,7 +3,7 @@ import PrimaryButton from '@/Components/PrimaryButton.vue';
 import SecondaryButton from '@/Components/SecondaryButton.vue';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import type { TrackRoute } from '@/types/routes';
-import { formatDistance } from '@/utils/routeMetrics';
+import { formatDistance, routeSegments } from '@/utils/routeMetrics';
 import { Head, Link } from '@inertiajs/vue3';
 import * as htmlToImage from 'html-to-image';
 import L, { type LatLngExpression, type Map as LeafletMap } from 'leaflet';
@@ -27,7 +27,7 @@ const showActivityIcon = ref(true);
 const isExporting = ref(false);
 
 let map: LeafletMap | null = null;
-let routeLine: L.Polyline | null = null;
+let routeLines: L.Polyline[] = [];
 
 const latLngs = computed<LatLngExpression[]>(() =>
     props.routeModel.points.map((point) => [point.lat, point.lng] as LatLngExpression),
@@ -60,10 +60,10 @@ onBeforeUnmount(() => {
 });
 
 watch([routeColor, lineWeight], () => {
-    routeLine?.setStyle({
+    routeLines.forEach((routeLine) => routeLine.setStyle({
         color: routeColor.value,
         weight: lineWeight.value,
-    });
+    }));
 });
 
 const initMap = () => {
@@ -83,13 +83,7 @@ const initMap = () => {
         crossOrigin: true,
     }).addTo(map);
 
-    routeLine = L.polyline(latLngs.value, {
-        color: routeColor.value,
-        weight: lineWeight.value,
-        opacity: 1,
-        lineCap: 'round',
-        lineJoin: 'round',
-    }).addTo(map);
+    routeLines = drawRouteLines(map);
 
     fitTrack();
     setTimeout(() => map?.invalidateSize(true), 80);
@@ -207,13 +201,7 @@ const createExportNode = async (): Promise<HTMLElement> => {
         maxZoom: 19,
     }).addTo(exportMap);
 
-    L.polyline(latLngs.value, {
-        color: routeColor.value,
-        lineCap: 'round',
-        lineJoin: 'round',
-        opacity: 1,
-        weight: lineWeight.value,
-    }).addTo(exportMap);
+    drawRouteLines(exportMap);
 
     await nextTick();
     exportMap.invalidateSize(true);
@@ -224,6 +212,17 @@ const createExportNode = async (): Promise<HTMLElement> => {
 
     return shot;
 };
+
+const drawRouteLines = (targetMap: LeafletMap): L.Polyline[] => routeSegments(props.routeModel.points)
+    .map((segment) => segment.map((point) => [point.lat, point.lng] as LatLngExpression))
+    .filter((segmentLatLngs) => segmentLatLngs.length >= 2)
+    .map((segmentLatLngs) => L.polyline(segmentLatLngs, {
+        color: routeColor.value,
+        lineCap: 'round',
+        lineJoin: 'round',
+        opacity: 1,
+        weight: lineWeight.value,
+    }).addTo(targetMap));
 
 const createMetricNode = (position: 'tl' | 'tr' | 'br', value: string, label: string): HTMLElement => {
     const wrapper = document.createElement('div');

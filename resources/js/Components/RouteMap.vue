@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { RoutePoint } from '@/types/routes';
+import { pointSegment, routeSegments } from '@/utils/routeMetrics';
 import L, { type LatLngExpression, type Map as LeafletMap } from 'leaflet';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
@@ -8,20 +9,23 @@ const props = withDefaults(
         points: RoutePoint[];
         editable?: boolean;
         showIntermediateMarkers?: boolean;
+        startNextSegment?: boolean;
     }>(),
     {
         editable: false,
         showIntermediateMarkers: false,
+        startNextSegment: false,
     },
 );
 
 const emit = defineEmits<{
     'update:points': [points: RoutePoint[]];
+    'segment-started': [];
 }>();
 
 const mapElement = ref<HTMLElement | null>(null);
 let map: LeafletMap | null = null;
-let line: L.Polyline | null = null;
+let lines: L.Polyline[] = [];
 let markers: L.CircleMarker[] = [];
 let userMarker: L.CircleMarker | null = null;
 let accuracyCircle: L.Circle | null = null;
@@ -103,13 +107,21 @@ onMounted(async () => {
 
     if (props.editable) {
         map.on('click', (event) => {
+            const lastPoint = props.points.at(-1);
+            const segment = (lastPoint ? pointSegment(lastPoint) : 0) + (props.startNextSegment ? 1 : 0);
+
             emit('update:points', [
                 ...props.points,
                 {
                     lat: Number(event.latlng.lat.toFixed(7)),
                     lng: Number(event.latlng.lng.toFixed(7)),
+                    segment,
                 },
             ]);
+
+            if (props.startNextSegment) {
+                emit('segment-started');
+            }
         });
     }
 
@@ -157,17 +169,26 @@ const renderRoute = () => {
         return;
     }
 
-    line?.remove();
+    lines.forEach((line) => line.remove());
+    lines = [];
     markers.forEach((marker) => marker.remove());
     markers = [];
 
     const latLngs = props.points.map((point) => [point.lat, point.lng] as LatLngExpression);
 
-    line = L.polyline(latLngs, {
-        color: '#2563eb',
-        weight: 5,
-        opacity: 0.9,
-    }).addTo(map);
+    routeSegments(props.points).forEach((segment) => {
+        const segmentLatLngs = segment.map((point) => [point.lat, point.lng] as LatLngExpression);
+
+        if (segmentLatLngs.length < 2) {
+            return;
+        }
+
+        lines.push(L.polyline(segmentLatLngs, {
+            color: '#2563eb',
+            weight: 5,
+            opacity: 0.9,
+        }).addTo(map!));
+    });
 
     props.points.forEach((point, index) => {
         const isEndpoint = index === 0 || index === props.points.length - 1;

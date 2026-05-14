@@ -65,6 +65,42 @@ class TrackRouteTest extends TestCase
         $this->get(route('public.routes.show', $route->share_token))->assertNotFound();
     }
 
+    public function test_route_segments_are_not_connected_in_metrics_or_gpx(): void
+    {
+        Http::fake([
+            'api.open-meteo.com/*' => Http::response([
+                'elevation' => [0, 10, 100, 105],
+            ]),
+        ]);
+
+        $user = User::factory()->create();
+
+        $this->actingAs($user)->post(route('routes.store'), [
+            'title' => 'Split skate',
+            'activity_date' => '2026-05-14',
+            'activity_type' => 'skateboard',
+            'comment' => null,
+            'is_shared' => false,
+            'points' => [
+                ['lat' => 55.751244, 'lng' => 37.618423, 'segment' => 0],
+                ['lat' => 55.751744, 'lng' => 37.618923, 'segment' => 0],
+                ['lat' => 59.938600, 'lng' => 30.314100, 'segment' => 1],
+                ['lat' => 59.939100, 'lng' => 30.314600, 'segment' => 1],
+            ],
+        ])->assertRedirect();
+
+        $route = TrackRoute::query()->firstOrFail();
+
+        $this->assertLessThan(200, $route->distance_m);
+        $this->assertSame(15, $route->elevation_gain_m);
+
+        $gpx = $this->actingAs($user)->get(route('routes.gpx', $route))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertSame(2, substr_count($gpx, '<trkseg>'));
+    }
+
     public function test_user_can_open_png_export_page_for_own_route(): void
     {
         $user = User::factory()->create();

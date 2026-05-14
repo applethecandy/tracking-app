@@ -9,7 +9,7 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import type { ActivityMap, RoutePoint, TrackRoute } from '@/types/routes';
 import { calculateDistance, formatDistance } from '@/utils/routeMetrics';
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 
 const props = defineProps<{
     routeModel: TrackRoute | null;
@@ -28,6 +28,7 @@ const form = useForm({
 
 const distance = computed(() => calculateDistance(form.points));
 const isEditing = computed(() => props.routeModel !== null);
+const startNextSegment = ref(false);
 
 const setPoints = (points: RoutePoint[]) => {
     form.points = points;
@@ -35,10 +36,20 @@ const setPoints = (points: RoutePoint[]) => {
 
 const undoPoint = () => {
     form.points = form.points.slice(0, -1);
+    startNextSegment.value = false;
 };
 
 const clearPoints = () => {
     form.points = [];
+    startNextSegment.value = false;
+};
+
+const requestSegmentBreak = () => {
+    startNextSegment.value = true;
+};
+
+const segmentBreakStarted = () => {
+    startNextSegment.value = false;
 };
 
 const submit = () => {
@@ -154,14 +165,28 @@ const submit = () => {
                     <SecondaryButton type="button" :disabled="form.points.length === 0" @click="undoPoint">
                         Убрать точку
                     </SecondaryButton>
+                    <SecondaryButton type="button" :disabled="form.points.length === 0 || startNextSegment" @click="requestSegmentBreak">
+                        Разрыв
+                    </SecondaryButton>
                     <SecondaryButton type="button" :disabled="form.points.length === 0" @click="clearPoints">
                         Очистить
                     </SecondaryButton>
                 </div>
+
+                <p v-if="startNextSegment" class="text-sm text-teal-700">
+                    Следующая точка начнет новый участок без соединительной линии.
+                </p>
             </section>
 
             <section>
-                <RouteMap :points="form.points" editable show-intermediate-markers @update:points="setPoints" />
+                <RouteMap
+                    :points="form.points"
+                    :start-next-segment="startNextSegment"
+                    editable
+                    show-intermediate-markers
+                    @segment-started="segmentBreakStarted"
+                    @update:points="setPoints"
+                />
             </section>
         </form>
     </AuthenticatedLayout>

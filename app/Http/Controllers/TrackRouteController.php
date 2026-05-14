@@ -138,6 +138,7 @@ class TrackRouteController extends Controller
             'points.*.lat' => ['required', 'numeric', 'between:-90,90'],
             'points.*.lng' => ['required', 'numeric', 'between:-180,180'],
             'points.*.ele' => ['nullable', 'numeric'],
+            'points.*.segment' => ['nullable', 'integer', 'min:0', 'max:1000'],
         ]);
     }
 

@@ -13,6 +13,7 @@ const props = defineProps<{
     routeModel: TrackRoute;
 }>();
 
+const MAX_ZOOM = 22;
 const mapElement = ref<HTMLElement | null>(null);
 const previewShell = ref<HTMLElement | null>(null);
 const shotElement = ref<HTMLElement | null>(null);
@@ -74,13 +75,15 @@ const initMap = () => {
     map = L.map(mapElement.value, {
         zoomControl: false,
         attributionControl: false,
+        maxZoom: MAX_ZOOM,
         wheelPxPerZoomLevel: 60,
         zoomSnap: 0.25,
     });
 
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
-        maxZoom: 19,
         crossOrigin: true,
+        maxNativeZoom: 19,
+        maxZoom: MAX_ZOOM,
     }).addTo(map);
 
     routeLines = drawRouteLines(map);
@@ -192,13 +195,15 @@ const createExportNode = async (): Promise<HTMLElement> => {
     const exportMap = L.map(mapNode, {
         attributionControl: false,
         zoomControl: false,
+        maxZoom: MAX_ZOOM,
         wheelPxPerZoomLevel: 60,
         zoomSnap: 0.25,
     });
 
     const tiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
         crossOrigin: true,
-        maxZoom: 19,
+        maxNativeZoom: 19,
+        maxZoom: MAX_ZOOM,
     }).addTo(exportMap);
 
     drawRouteLines(exportMap);

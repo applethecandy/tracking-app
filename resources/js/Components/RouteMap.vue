@@ -34,6 +34,7 @@ const emit = defineEmits<{
     'segment-started': [];
 }>();
 
+const MAX_ZOOM = 22;
 const mapElement = ref<HTMLElement | null>(null);
 let map: LeafletMap | null = null;
 let lines: L.Polyline[] = [];
@@ -61,48 +62,56 @@ onMounted(async () => {
     }
 
     map = L.map(mapElement.value, {
+        maxZoom: MAX_ZOOM,
         zoomControl: true,
     }).setView(center.value, props.points.length > 0 ? 13 : 11);
 
     const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors',
-        maxZoom: 19,
+        maxNativeZoom: 19,
+        maxZoom: MAX_ZOOM,
     });
 
     const hot = L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors, HOT',
-        maxZoom: 19,
+        maxNativeZoom: 19,
+        maxZoom: MAX_ZOOM,
     });
 
     const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenTopoMap contributors',
-        maxZoom: 17,
+        maxNativeZoom: 17,
+        maxZoom: MAX_ZOOM,
     });
 
     const cartoNoLabels = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
         attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-        maxZoom: 19,
+        maxNativeZoom: 19,
+        maxZoom: MAX_ZOOM,
     });
 
     const imagery = L.tileLayer(
         'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
         {
             attribution: 'Tiles &copy; Esri',
-            maxZoom: 19,
+            maxNativeZoom: 19,
+            maxZoom: MAX_ZOOM,
         },
     );
     const hybridLabels = L.tileLayer(
         'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
         {
             attribution: 'Labels &copy; Esri',
-            maxZoom: 19,
+            maxNativeZoom: 19,
+            maxZoom: MAX_ZOOM,
         },
     );
     const hybridTransportation = L.tileLayer(
         'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
         {
             attribution: 'Roads &copy; Esri',
-            maxZoom: 19,
+            maxNativeZoom: 19,
+            maxZoom: MAX_ZOOM,
         },
     );
     const hybrid = L.layerGroup([imagery, hybridTransportation, hybridLabels]);

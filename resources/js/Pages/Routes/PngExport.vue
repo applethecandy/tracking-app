@@ -206,12 +206,17 @@ const createExportNode = async (): Promise<HTMLElement> => {
         maxZoom: MAX_ZOOM,
     }).addTo(exportMap);
 
-    drawRouteLines(exportMap);
-
     await nextTick();
     exportMap.invalidateSize(true);
-    const pad = Math.max(24, lineWeight.value * 2 + 12);
-    exportMap.fitBounds(L.latLngBounds(latLngs.value), { padding: [pad, pad] });
+
+    if (map) {
+        exportMap.setView(map.getCenter(), map.getZoom(), { animate: false });
+    } else {
+        const pad = Math.max(24, lineWeight.value * 2 + 12);
+        exportMap.fitBounds(L.latLngBounds(latLngs.value), { padding: [pad, pad] });
+    }
+
+    drawRouteLines(exportMap);
 
     await waitForTiles(tiles);
 

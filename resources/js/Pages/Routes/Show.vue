@@ -5,7 +5,7 @@ import RouteMap from '@/Components/RouteMap.vue';
 import SecondaryButton from '@/Components/SecondaryButton.vue';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import type { ActivityMap, TrackRoute } from '@/types/routes';
-import { formatDistance, formatElevation } from '@/utils/routeMetrics';
+import { formatDistance, formatDuration, formatElevation } from '@/utils/routeMetrics';
 import { Head, Link, router } from '@inertiajs/vue3';
 
 defineProps<{
@@ -57,9 +57,9 @@ const destroyRoute = (id: number) => {
                             <div class="text-sm text-gray-500">Длина</div>
                             <div class="mt-1 text-xl font-semibold text-gray-900">{{ formatDistance(routeModel.distance_m) }}</div>
                         </div>
-                        <div>
-                            <div class="text-sm text-gray-500">Точек</div>
-                            <div class="mt-1 text-xl font-semibold text-gray-900">{{ routeModel.points.length }}</div>
+                        <div v-if="routeModel.duration_minutes">
+                            <div class="text-sm text-gray-500">Время</div>
+                            <div class="mt-1 text-xl font-semibold text-gray-900">{{ formatDuration(routeModel.duration_minutes) }}</div>
                         </div>
                         <div>
                             <div class="text-sm text-gray-500">Набор</div>

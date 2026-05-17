@@ -371,6 +371,13 @@ const submit = () => {
                     @update:points="setPoints"
                 />
 
+                <div class="absolute left-16 top-3 z-[1000] grid grid-cols-2 gap-2 rounded-md bg-white/92 p-2 text-sm shadow-lg ring-1 ring-black/10 backdrop-blur sm:flex">
+                    <div class="min-w-24 rounded bg-white px-3 py-2">
+                        <div class="text-xs text-gray-500">Длина</div>
+                        <div class="font-semibold text-gray-900">{{ formatDistance(distance) }}</div>
+                    </div>
+                </div>
+
                 <div class="absolute bottom-4 left-4 z-[1000] flex max-w-[calc(100vw-2rem)] flex-wrap gap-2 rounded-md bg-white/92 p-2 shadow-lg ring-1 ring-black/10 backdrop-blur">
                     <button
                         type="button"

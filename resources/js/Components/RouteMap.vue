@@ -35,14 +35,18 @@ const emit = defineEmits<{
 }>();
 
 const MAX_ZOOM = 22;
+type MapLayer = 'scheme' | 'screenshot' | 'hybrid';
+
 const mapElement = ref<HTMLElement | null>(null);
+const activeLayer = ref<MapLayer>('scheme');
+const locating = ref(false);
 let map: LeafletMap | null = null;
+let mapLayers: Record<MapLayer, L.Layer> | null = null;
 let lines: L.Polyline[] = [];
 let insertLines: L.Polyline[] = [];
 let markers: L.Layer[] = [];
 let userMarker: L.CircleMarker | null = null;
 let accuracyCircle: L.Circle | null = null;
-let fullscreenButton: HTMLButtonElement | null = null;
 let hasFittedRoute = false;
 const shouldFitInitialEditableRoute = props.editable && props.points.length > 0;
 
@@ -63,24 +67,12 @@ onMounted(async () => {
 
     map = L.map(mapElement.value, {
         maxZoom: MAX_ZOOM,
-        zoomControl: true,
+        zoomControl: false,
     }).setView(center.value, props.points.length > 0 ? 13 : 11);
 
     const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors',
         maxNativeZoom: 19,
-        maxZoom: MAX_ZOOM,
-    });
-
-    const hot = L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors, HOT',
-        maxNativeZoom: 19,
-        maxZoom: MAX_ZOOM,
-    });
-
-    const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenTopoMap contributors',
-        maxNativeZoom: 17,
         maxZoom: MAX_ZOOM,
     });
 
@@ -115,18 +107,13 @@ onMounted(async () => {
         },
     );
     const hybrid = L.layerGroup([imagery, hybridTransportation, hybridLabels]);
+    mapLayers = {
+        scheme: osm,
+        screenshot: cartoNoLabels,
+        hybrid,
+    };
 
-    osm.addTo(map);
-    L.control.layers({
-        OSM: osm,
-        'OSM HOT': hot,
-        'Топо': topo,
-        'Скриншот': cartoNoLabels,
-        'Спутник': imagery,
-        'Спутник гибрид': hybrid,
-    }).addTo(map);
-    addGeolocationControl();
-    addFullscreenControl();
+    mapLayers[activeLayer.value].addTo(map);
 
     if (props.editable) {
         map.on('click', (event) => {
@@ -153,6 +140,7 @@ onMounted(async () => {
     }
 
     map.on('locationfound', (event) => {
+        locating.value = false;
         userMarker?.remove();
         accuracyCircle?.remove();
 
@@ -174,6 +162,7 @@ onMounted(async () => {
     });
 
     map.on('locationerror', (event) => {
+        locating.value = false;
         window.alert(event.message || 'Не удалось определить местоположение.');
     });
 
@@ -205,10 +194,45 @@ watch(
     () => props.fullscreen,
     async () => {
         await nextTick();
-        updateFullscreenButton();
         window.setTimeout(() => map?.invalidateSize(false), 80);
     },
 );
+
+const setMapLayer = (layer: MapLayer) => {
+    if (!map || !mapLayers || activeLayer.value === layer) {
+        return;
+    }
+
+    map.removeLayer(mapLayers[activeLayer.value]);
+    activeLayer.value = layer;
+    mapLayers[layer].addTo(map);
+};
+
+const zoomIn = () => {
+    map?.zoomIn();
+};
+
+const zoomOut = () => {
+    map?.zoomOut();
+};
+
+const locateUser = () => {
+    if (!map || locating.value) {
+        return;
+    }
+
+    locating.value = true;
+    map.locate({
+        setView: true,
+        maxZoom: 16,
+        enableHighAccuracy: true,
+        timeout: 10000,
+    });
+};
+
+const toggleFullscreen = () => {
+    emit('update:fullscreen', !props.fullscreen);
+};
 
 const renderRoute = () => {
     if (!map) {
@@ -396,133 +420,92 @@ const pointIcon = (color: string, size: number, selected: boolean): L.DivIcon =>
     iconSize: [size, size],
 });
 
-const addGeolocationControl = () => {
-    if (!map) {
-        return;
-    }
+</script>
 
-    const LocateControl = L.Control.extend({
-        onAdd(controlMap: LeafletMap) {
-            const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control route-map-locate-control');
-            const button = L.DomUtil.create('button', 'route-map-locate', container);
-            button.type = 'button';
-            button.title = 'Показать мое местоположение';
-            button.setAttribute('aria-label', 'Показать мое местоположение');
-            button.innerHTML = `
+<template>
+    <div class="relative h-full min-h-[440px] w-full overflow-hidden rounded border border-gray-200 bg-gray-100">
+        <div ref="mapElement" class="absolute inset-0" />
+
+        <div class="absolute left-3 top-3 z-[1000] flex flex-col gap-2">
+            <button type="button" class="route-map-control-button" title="Приблизить" aria-label="Приблизить" @click.stop="zoomIn">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 5v14" />
+                    <path d="M5 12h14" />
+                </svg>
+            </button>
+            <button type="button" class="route-map-control-button" title="Отдалить" aria-label="Отдалить" @click.stop="zoomOut">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M5 12h14" />
+                </svg>
+            </button>
+            <button
+                type="button"
+                class="route-map-control-button"
+                :class="{ 'is-loading': locating }"
+                :disabled="locating"
+                title="Показать мое местоположение"
+                aria-label="Показать мое местоположение"
+                @click.stop="locateUser"
+            >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M12 3v3m0 12v3M3 12h3m12 0h3" />
                     <circle cx="12" cy="12" r="5" />
                     <circle cx="12" cy="12" r="1.5" />
                 </svg>
-            `;
+            </button>
+            <button
+                type="button"
+                class="route-map-control-button"
+                :title="fullscreen ? 'Выйти из полноэкранного режима' : 'Открыть карту на весь экран'"
+                :aria-label="fullscreen ? 'Выйти из полноэкранного режима' : 'Открыть карту на весь экран'"
+                @click.stop="toggleFullscreen"
+            >
+                <svg v-if="fullscreen" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M9 4v5H4" />
+                    <path d="M15 4v5h5" />
+                    <path d="M9 20v-5H4" />
+                    <path d="M15 20v-5h5" />
+                </svg>
+                <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 9V4h5" />
+                    <path d="M20 9V4h-5" />
+                    <path d="M4 15v5h5" />
+                    <path d="M20 15v5h-5" />
+                </svg>
+            </button>
+        </div>
 
-            L.DomEvent.disableClickPropagation(container);
-            L.DomEvent.on(button, 'click', () => {
-                controlMap.locate({
-                    setView: true,
-                    maxZoom: 16,
-                    enableHighAccuracy: true,
-                    timeout: 10000,
-                });
-            });
-
-            return container;
-        },
-    });
-
-    new LocateControl({ position: 'topleft' }).addTo(map);
-};
-
-const addFullscreenControl = () => {
-    if (!map) {
-        return;
-    }
-
-    const FullscreenControl = L.Control.extend({
-        onAdd() {
-            const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control route-map-fullscreen-control');
-            fullscreenButton = L.DomUtil.create('button', 'route-map-fullscreen', container);
-            fullscreenButton.type = 'button';
-
-            updateFullscreenButton();
-
-            L.DomEvent.disableClickPropagation(container);
-            L.DomEvent.on(fullscreenButton, 'click', () => {
-                emit('update:fullscreen', !props.fullscreen);
-            });
-
-            return container;
-        },
-    });
-
-    new FullscreenControl({ position: 'topleft' }).addTo(map);
-};
-
-const updateFullscreenButton = () => {
-    if (!fullscreenButton) {
-        return;
-    }
-
-    fullscreenButton.title = props.fullscreen ? 'Выйти из полноэкранного режима' : 'Открыть карту на весь экран';
-    fullscreenButton.setAttribute('aria-label', fullscreenButton.title);
-    fullscreenButton.innerHTML = props.fullscreen
-        ? `
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M9 4v5H4" />
-                <path d="M15 4v5h5" />
-                <path d="M9 20v-5H4" />
-                <path d="M15 20v-5h5" />
-            </svg>
-        `
-        : `
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 9V4h5" />
-                <path d="M20 9V4h-5" />
-                <path d="M4 15v5h5" />
-                <path d="M20 15v5h-5" />
-            </svg>
-        `;
-};
-</script>
-
-<template>
-    <div
-        ref="mapElement"
-        class="h-full min-h-[440px] w-full overflow-hidden rounded border border-gray-200 bg-gray-100"
-    />
+        <div class="absolute right-3 top-3 z-[1000] flex flex-wrap justify-end gap-2">
+            <button type="button" class="route-map-layer-button" :class="{ 'is-active': activeLayer === 'scheme' }" @click.stop="setMapLayer('scheme')">
+                Схема
+            </button>
+            <button type="button" class="route-map-layer-button" :class="{ 'is-active': activeLayer === 'screenshot' }" @click.stop="setMapLayer('screenshot')">
+                Скриншот
+            </button>
+            <button type="button" class="route-map-layer-button" :class="{ 'is-active': activeLayer === 'hybrid' }" @click.stop="setMapLayer('hybrid')">
+                Спутник
+            </button>
+        </div>
+    </div>
 </template>
 
 <style scoped>
-:global(.route-map-locate-control) {
-    border: 1px solid rgba(17, 24, 39, 0.18);
-    border-radius: 4px;
-    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.18);
-    overflow: hidden;
-}
-
-:global(.route-map-fullscreen-control) {
-    border: 1px solid rgba(17, 24, 39, 0.18);
-    border-radius: 4px;
-    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.18);
-    overflow: hidden;
-}
-
-:global(.route-map-locate),
-:global(.route-map-fullscreen) {
+.route-map-control-button {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 34px;
-    height: 34px;
+    width: 38px;
+    height: 38px;
     cursor: pointer;
     background: #ffffff;
-    color: #1f2937;
-    border: 0;
+    color: #111827;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
     padding: 0;
 }
 
-:global(.route-map-locate svg),
-:global(.route-map-fullscreen svg) {
+.route-map-control-button svg {
     width: 20px;
     height: 20px;
     fill: none;
@@ -532,10 +515,44 @@ const updateFullscreenButton = () => {
     stroke-linejoin: round;
 }
 
-:global(.route-map-locate:hover),
-:global(.route-map-fullscreen:hover) {
-    background: #f3f4f6;
+.route-map-control-button:hover:not(:disabled),
+.route-map-control-button.is-loading {
     color: #0f766e;
+    background: #ecfdf5;
+    border-color: #0f766e;
+}
+
+.route-map-control-button.is-loading svg {
+    animation: route-map-spin 1s linear infinite;
+}
+
+.route-map-control-button:disabled {
+    cursor: wait;
+}
+
+.route-map-layer-button {
+    min-height: 34px;
+    padding: 0 12px;
+    color: #111827;
+    font-size: 12px;
+    font-weight: 700;
+    background: rgba(255, 255, 255, 0.94);
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
+}
+
+.route-map-layer-button:hover,
+.route-map-layer-button.is-active {
+    color: #0f766e;
+    background: #ecfdf5;
+    border-color: #0f766e;
+}
+
+@keyframes route-map-spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 :global(.route-map-point-icon) {

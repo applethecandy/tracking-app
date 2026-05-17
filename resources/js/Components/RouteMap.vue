@@ -475,7 +475,7 @@ const pointIcon = (color: string, size: number, selected: boolean): L.DivIcon =>
             </button>
         </div>
 
-        <div class="absolute right-3 top-3 z-[1000] flex flex-wrap justify-end gap-2">
+        <div class="absolute right-3 top-3 z-[1000] flex flex-col items-end gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
             <button type="button" class="route-map-layer-button" :class="{ 'is-active': activeLayer === 'scheme' }" @click.stop="setMapLayer('scheme')">
                 Схема
             </button>

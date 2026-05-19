@@ -33,6 +33,7 @@ const pointSelectMode = ref(false);
 const startNextSegment = ref(false);
 const selectedPointIndex = ref<number | null>(null);
 const undoStack = ref<RoutePoint[][]>([]);
+const gpxError = ref('');
 const canUndo = computed(() => undoStack.value.length > 0);
 
 const clonePoints = (points: RoutePoint[]): RoutePoint[] => points.map((point) => ({ ...point }));
@@ -124,6 +125,167 @@ const togglePointSelectMode = () => {
     selectedPointIndex.value = null;
 };
 
+const importGpx = async (event: Event) => {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+
+    gpxError.value = '';
+
+    if (!file) {
+        return;
+    }
+
+    try {
+        const text = await file.text();
+        const parsed = parseGpx(text, file.name);
+
+        if (parsed.points.length < 2) {
+            gpxError.value = 'В GPX не найден маршрут минимум из двух точек.';
+            return;
+        }
+
+        form.title = parsed.title || form.title;
+        form.activity_date = parsed.activityDate || form.activity_date;
+        form.duration_minutes = parsed.durationMinutes ? parsed.durationMinutes.toString() : form.duration_minutes;
+        form.activity_type = parsed.activityType || form.activity_type;
+        applyPoints(parsed.points);
+        resetMapModes();
+        selectedPointIndex.value = null;
+    } catch (error) {
+        gpxError.value = error instanceof Error ? error.message : 'Не удалось прочитать GPX.';
+    } finally {
+        input.value = '';
+    }
+};
+
+const parseGpx = (contents: string, filename: string): { title: string; activityDate: string; activityType: string; durationMinutes: number | null; points: RoutePoint[] } => {
+    const parser = new DOMParser();
+    const xml = parser.parseFromString(contents, 'application/xml');
+
+    if (xml.querySelector('parsererror')) {
+        throw new Error('Файл не похож на корректный GPX.');
+    }
+
+    const segments = elements(xml, 'trkseg');
+    const points: RoutePoint[] = [];
+    const times: Date[] = [];
+
+    if (segments.length > 0) {
+        segments.forEach((segment, segmentIndex) => {
+            elements(segment, 'trkpt').forEach((point) => {
+                const parsedPoint = parseGpxPoint(point, segmentIndex);
+
+                if (parsedPoint) {
+                    points.push(parsedPoint.point);
+
+                    if (parsedPoint.time) {
+                        times.push(parsedPoint.time);
+                    }
+                }
+            });
+        });
+    } else {
+        elements(xml, 'rtept').forEach((point) => {
+            const parsedPoint = parseGpxPoint(point, 0);
+
+            if (parsedPoint) {
+                points.push(parsedPoint.point);
+
+                if (parsedPoint.time) {
+                    times.push(parsedPoint.time);
+                }
+            }
+        });
+    }
+
+    const firstTime = times[0] ?? firstGpxTime(xml);
+    const lastTime = times.at(-1) ?? null;
+
+    return {
+        title: firstNestedText(xml, 'trk', 'name') || firstNestedText(xml, 'rte', 'name') || filename.replace(/\.[^.]+$/, ''),
+        activityDate: firstTime ? firstTime.toISOString().slice(0, 10) : '',
+        activityType: activityFromGpxType(firstNestedText(xml, 'trk', 'type') || firstNestedText(xml, 'rte', 'type')),
+        durationMinutes: firstTime && lastTime && lastTime > firstTime
+            ? Math.max(1, Math.round((lastTime.getTime() - firstTime.getTime()) / 60000))
+            : null,
+        points,
+    };
+};
+
+const parseGpxPoint = (element: Element, segment: number): { point: RoutePoint; time: Date | null } | null => {
+    const lat = Number(element.getAttribute('lat'));
+    const lng = Number(element.getAttribute('lon'));
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return null;
+    }
+
+    const eleText = directText(element, 'ele');
+    const timeText = directText(element, 'time');
+
+    return {
+        point: {
+            lat: Number(lat.toFixed(7)),
+            lng: Number(lng.toFixed(7)),
+            ele: eleText !== '' && Number.isFinite(Number(eleText)) ? Number(eleText) : null,
+            segment,
+        },
+        time: timeText ? parseDate(timeText) : null,
+    };
+};
+
+const elements = (root: Document | Element, tagName: string): Element[] => [
+    ...Array.from(root.getElementsByTagName(tagName)),
+    ...Array.from(root.getElementsByTagNameNS('*', tagName)),
+].filter((element, index, all) => all.indexOf(element) === index);
+
+const firstNestedText = (root: Document, parentTagName: string, childTagName: string): string => {
+    const parent = elements(root, parentTagName)[0];
+
+    return parent ? directText(parent, childTagName) : '';
+};
+
+const directText = (root: Element, tagName: string): string => {
+    const child = Array.from(root.children).find((element) => element.localName === tagName || element.tagName === tagName);
+
+    return child?.textContent?.trim() ?? '';
+};
+
+const firstGpxTime = (root: Document): Date | null => {
+    const metadata = elements(root, 'metadata')[0];
+    const timeText = metadata ? directText(metadata, 'time') : directText(root.documentElement, 'time');
+
+    return timeText ? parseDate(timeText) : null;
+};
+
+const activityFromGpxType = (value: string): string => {
+    const normalized = value.toLowerCase();
+
+    if (normalized.includes('run')) {
+        return 'run';
+    }
+
+    if (normalized.includes('walk') || normalized.includes('hike')) {
+        return 'walk';
+    }
+
+    if (normalized.includes('car') || normalized.includes('drive')) {
+        return 'car';
+    }
+
+    if (normalized.includes('skate')) {
+        return 'skateboard';
+    }
+
+    return '';
+};
+
+const parseDate = (value: string): Date | null => {
+    const date = new Date(value);
+
+    return Number.isNaN(date.getTime()) ? null : date;
+};
+
 const submit = () => {
     if (props.routeModel) {
         form.put(route('routes.update', props.routeModel.id));
@@ -161,6 +323,18 @@ const submit = () => {
                     <InputLabel for="title" value="Название" />
                     <TextInput id="title" v-model="form.title" class="mt-1 block w-full" required />
                     <InputError :message="form.errors.title" class="mt-2" />
+                </div>
+
+                <div v-if="!isEditing" class="rounded border border-dashed border-gray-300 bg-gray-50 p-4">
+                    <InputLabel for="gpx_import" value="Импорт GPX" />
+                    <input
+                        id="gpx_import"
+                        type="file"
+                        accept=".gpx,application/gpx+xml,application/xml,text/xml"
+                        class="mt-2 block w-full text-sm text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-gray-900 file:px-3 file:py-2 file:text-xs file:font-semibold file:uppercase file:tracking-widest file:text-white hover:file:bg-gray-800"
+                        @change="importGpx"
+                    />
+                    <p v-if="gpxError" class="mt-2 text-sm text-red-600">{{ gpxError }}</p>
                 </div>
 
                 <div>

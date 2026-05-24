@@ -35,6 +35,7 @@ const emit = defineEmits<{
 }>();
 
 const MAX_ZOOM = 22;
+const VIEWPORT_PADDING = 0.35;
 type MapLayer = 'scheme' | 'screenshot' | 'hybrid';
 
 const mapElement = ref<HTMLElement | null>(null);
@@ -139,6 +140,8 @@ onMounted(async () => {
         });
     }
 
+    map.on('moveend zoomend', () => renderViewportRouteLayers());
+
     map.on('locationfound', (event) => {
         locating.value = false;
         userMarker?.remove();
@@ -241,10 +244,7 @@ const renderRoute = () => {
 
     lines.forEach((line) => line.remove());
     lines = [];
-    insertLines.forEach((line) => line.remove());
-    insertLines = [];
-    markers.forEach((marker) => marker.remove());
-    markers = [];
+    clearViewportRouteLayers();
 
     const latLngs = props.points.map((point) => [point.lat, point.lng] as LatLngExpression);
 
@@ -266,10 +266,48 @@ const renderRoute = () => {
         renderInsertLines();
     }
 
+    renderPointMarkers();
+
+    if (
+        latLngs.length > 0
+        && (!props.editable || (shouldFitInitialEditableRoute && !hasFittedRoute))
+    ) {
+        map.fitBounds(L.latLngBounds(latLngs), { padding: [32, 32], maxZoom: 15 });
+        hasFittedRoute = true;
+        renderViewportRouteLayers();
+    }
+};
+
+const renderViewportRouteLayers = () => {
+    if (!map) {
+        return;
+    }
+
+    clearViewportRouteLayers();
+
+    if (props.editable && props.insertMode) {
+        renderInsertLines();
+    }
+
+    renderPointMarkers();
+};
+
+const clearViewportRouteLayers = () => {
+    insertLines.forEach((line) => line.remove());
+    insertLines = [];
+    markers.forEach((marker) => marker.remove());
+    markers = [];
+};
+
+const renderPointMarkers = () => {
     props.points.forEach((point, index) => {
         const isEndpoint = index === 0 || index === props.points.length - 1;
 
         if (!props.showIntermediateMarkers && !isEndpoint) {
+            return;
+        }
+
+        if (!shouldRenderPoint(point, index, isEndpoint)) {
             return;
         }
 
@@ -279,17 +317,19 @@ const renderRoute = () => {
 
         markers.push(marker);
     });
+};
 
-    if (
-        latLngs.length > 0
-        && (!props.editable || (shouldFitInitialEditableRoute && !hasFittedRoute))
-    ) {
-        map.fitBounds(L.latLngBounds(latLngs), { padding: [32, 32], maxZoom: 15 });
-        hasFittedRoute = true;
+const shouldRenderPoint = (point: RoutePoint, index: number, isEndpoint: boolean): boolean => {
+    if (!map || isEndpoint || props.selectedPointIndex === index) {
+        return true;
     }
+
+    return map.getBounds().pad(VIEWPORT_PADDING).contains([point.lat, point.lng]);
 };
 
 const renderInsertLines = () => {
+    const visibleBounds = map!.getBounds().pad(VIEWPORT_PADDING);
+
     props.points.forEach((point, index) => {
         if (index === 0) {
             return;
@@ -298,6 +338,13 @@ const renderInsertLines = () => {
         const previous = props.points[index - 1];
 
         if (pointSegment(previous) !== pointSegment(point)) {
+            return;
+        }
+
+        if (!visibleBounds.intersects(L.latLngBounds([
+            [previous.lat, previous.lng],
+            [point.lat, point.lng],
+        ]))) {
             return;
         }
 

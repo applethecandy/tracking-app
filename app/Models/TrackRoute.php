@@ -50,6 +50,6 @@ class TrackRoute extends Model
 
     public function getActivityLabelAttribute(): string
     {
-        return self::ACTIVITIES[$this->activity_type] ?? $this->activity_type;
+        return self::ACTIVITIES[$this->activity_type] ?? ($this->activity_type ?: 'Не указано');
     }
 }

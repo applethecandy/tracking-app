@@ -4,10 +4,13 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import type { ActivityMap, TrackRoute } from '@/types/routes';
 import { formatDistance, formatElevation } from '@/utils/routeMetrics';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
+import { computed } from 'vue';
 
 type PaginatedRoutes = {
     data: TrackRoute[];
     links: { url: string | null; label: string; active: boolean }[];
+    current_page: number;
+    last_page: number;
 };
 
 const props = defineProps<{
@@ -31,6 +34,10 @@ const form = useForm({
     activity_type: props.filters.activity_type ?? '',
 });
 
+const paginationPages = computed(() => {
+    return Array.from({ length: props.routes.last_page }, (_, index) => index + 1);
+});
+
 const applyFilters = () => {
     form.get(route('routes.index'), {
         preserveState: true,
@@ -40,6 +47,20 @@ const applyFilters = () => {
 
 const resetFilters = () => {
     router.get(route('routes.index'));
+};
+
+const goToPage = (page: number) => {
+    if (page < 1 || page > props.routes.last_page || page === props.routes.current_page) {
+        return;
+    }
+
+    router.get(route('routes.index'), {
+        ...props.filters,
+        page,
+    }, {
+        preserveState: true,
+        preserveScroll: true,
+    });
 };
 </script>
 
@@ -126,15 +147,37 @@ const resetFilters = () => {
                 </div>
             </section>
 
-            <nav v-if="routes.links.length > 3" class="flex flex-wrap gap-2">
-                <Link
-                    v-for="link in routes.links"
-                    :key="link.label"
-                    :href="link.url || '#'"
+            <nav v-if="routes.last_page > 1" class="flex flex-wrap gap-2" aria-label="Пагинация маршрутов">
+                <button
+                    type="button"
+                    class="rounded border px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                    :class="routes.current_page === 1 ? 'border-gray-200 bg-gray-50 text-gray-400' : 'border-gray-200 bg-white text-gray-700 hover:border-teal-700 hover:text-teal-700'"
+                    :disabled="routes.current_page === 1"
+                    @click="goToPage(routes.current_page - 1)"
+                >
+                    Назад
+                </button>
+
+                <button
+                    v-for="page in paginationPages"
+                    :key="page"
+                    type="button"
                     class="rounded border px-3 py-1 text-sm"
-                    :class="link.active ? 'border-teal-700 bg-teal-700 text-white' : 'border-gray-200 bg-white text-gray-700'"
-                    v-html="link.label"
-                />
+                    :class="page === routes.current_page ? 'border-teal-700 bg-teal-700 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-teal-700 hover:text-teal-700'"
+                    @click="goToPage(page)"
+                >
+                    {{ page }}
+                </button>
+
+                <button
+                    type="button"
+                    class="rounded border px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                    :class="routes.current_page === routes.last_page ? 'border-gray-200 bg-gray-50 text-gray-400' : 'border-gray-200 bg-white text-gray-700 hover:border-teal-700 hover:text-teal-700'"
+                    :disabled="routes.current_page === routes.last_page"
+                    @click="goToPage(routes.current_page + 1)"
+                >
+                    Вперед
+                </button>
             </nav>
         </main>
     </AuthenticatedLayout>

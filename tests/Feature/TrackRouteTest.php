@@ -101,6 +101,30 @@ class TrackRouteTest extends TestCase
         $this->assertSame(2, substr_count($gpx, '<trkseg>'));
     }
 
+    public function test_user_can_open_second_routes_page(): void
+    {
+        $user = User::factory()->create();
+
+        TrackRoute::factory()
+            ->count(13)
+            ->for($user)
+            ->create([
+                'distance_m' => 1000,
+                'elevation_gain_m' => 10,
+            ]);
+
+        $this->actingAs($user)
+            ->get(route('routes.index', ['page' => 2]))
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Routes/Index')
+                ->where('routes.current_page', 2)
+                ->where('totals.routes_count', 13)
+                ->where('totals.distance_m', 13000)
+                ->where('totals.elevation_gain_m', 130)
+            );
+    }
+
     public function test_user_can_open_png_export_page_for_own_route(): void
     {
         $user = User::factory()->create();

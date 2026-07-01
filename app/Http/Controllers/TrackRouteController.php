@@ -23,7 +23,7 @@ class TrackRouteController extends Controller
             'activity_type' => ['nullable', Rule::in(array_keys(TrackRoute::ACTIVITIES))],
         ]);
 
-        $query = $request->user()->trackRoutes()->latest('activity_date');
+        $query = $request->user()->trackRoutes();
 
         if (! empty($filters['date_from'])) {
             $query->whereDate('activity_date', '>=', $filters['date_from']);
@@ -37,10 +37,26 @@ class TrackRouteController extends Controller
             $query->where('activity_type', $filters['activity_type']);
         }
 
-        $routes = $query->paginate(12)->withQueryString();
         $totals = (clone $query)
             ->selectRaw('COUNT(*) as routes_count, COALESCE(SUM(distance_m), 0) as distance_m, COALESCE(SUM(elevation_gain_m), 0) as elevation_gain_m')
             ->first();
+        $routes = (clone $query)
+            ->select([
+                'id',
+                'user_id',
+                'title',
+                'activity_date',
+                'duration_minutes',
+                'activity_type',
+                'distance_m',
+                'elevation_gain_m',
+                'elevation_loss_m',
+                'is_shared',
+                'created_at',
+            ])
+            ->latest('activity_date')
+            ->paginate(12)
+            ->withQueryString();
 
         return Inertia::render('Routes/Index', [
             'routes' => $routes,

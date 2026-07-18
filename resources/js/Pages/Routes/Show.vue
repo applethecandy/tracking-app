@@ -7,6 +7,9 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import type { ActivityMap, TrackRoute } from '@/types/routes';
 import { formatDistance, formatDuration, formatElevation } from '@/utils/routeMetrics';
 import { Head, Link, router } from '@inertiajs/vue3';
+import { ref } from 'vue';
+
+const mapFullscreen = ref(false);
 
 defineProps<{
     routeModel: TrackRoute;
@@ -17,6 +20,10 @@ const destroyRoute = (id: number) => {
     if (window.confirm('Удалить маршрут?')) {
         router.delete(route('routes.destroy', id));
     }
+};
+
+const setMapFullscreen = (fullscreen: boolean) => {
+    mapFullscreen.value = fullscreen;
 };
 </script>
 
@@ -47,7 +54,11 @@ const destroyRoute = (id: number) => {
 
         <main class="mx-auto grid max-w-7xl gap-6 px-4 py-6 lg:grid-cols-[1fr_340px] lg:px-8">
             <section>
-                <RouteMap :points="routeModel.points" />
+                <RouteMap
+                    :fullscreen="mapFullscreen"
+                    :points="routeModel.points"
+                    @update:fullscreen="setMapFullscreen"
+                />
             </section>
 
             <aside class="space-y-5">

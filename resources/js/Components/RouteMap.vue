@@ -470,7 +470,10 @@ const pointIcon = (color: string, size: number, selected: boolean): L.DivIcon =>
 </script>
 
 <template>
-    <div class="relative h-full min-h-[440px] w-full overflow-hidden rounded border border-gray-200 bg-gray-100">
+    <div
+        class="relative h-full min-h-[440px] w-full overflow-hidden rounded border border-gray-200 bg-gray-100"
+        :class="{ 'route-map-fullscreen': fullscreen && !editable }"
+    >
         <div ref="mapElement" class="absolute inset-0" />
 
         <div class="absolute left-3 top-3 z-[1000] flex flex-col gap-2">
@@ -550,6 +553,16 @@ const pointIcon = (color: string, size: number, selected: boolean): L.DivIcon =>
     border-radius: 6px;
     box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
     padding: 0;
+}
+
+.route-map-fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    width: 100vw;
+    height: 100dvh;
+    min-height: 0;
+    border-radius: 0;
 }
 
 .route-map-control-button svg {

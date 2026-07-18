@@ -3,6 +3,13 @@ import RouteMap from '@/Components/RouteMap.vue';
 import type { TrackRoute } from '@/types/routes';
 import { formatDistance, formatDuration, formatElevation } from '@/utils/routeMetrics';
 import { Head, Link } from '@inertiajs/vue3';
+import { ref } from 'vue';
+
+const mapFullscreen = ref(false);
+
+const setMapFullscreen = (fullscreen: boolean) => {
+    mapFullscreen.value = fullscreen;
+};
 
 defineProps<{
     routeModel: TrackRoute;
@@ -38,7 +45,11 @@ defineProps<{
         </header>
 
         <section class="mx-auto grid max-w-7xl gap-6 px-4 py-6 lg:grid-cols-[1fr_340px] lg:px-8">
-            <RouteMap :points="routeModel.points" />
+            <RouteMap
+                :fullscreen="mapFullscreen"
+                :points="routeModel.points"
+                @update:fullscreen="setMapFullscreen"
+            />
 
             <aside class="space-y-5">
                 <section class="rounded border border-gray-200 bg-white p-5 shadow-sm">

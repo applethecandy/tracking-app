@@ -11,8 +11,9 @@ const props = withDefaults(
         fullscreen?: boolean;
         insertMode?: boolean;
         pointSelectMode?: boolean;
-        selectedPointIndex?: number | null;
+        selectedPointIndexes?: number[];
         showIntermediateMarkers?: boolean;
+        splitMode?: boolean;
         startNextSegment?: boolean;
     }>(),
     {
@@ -20,15 +21,17 @@ const props = withDefaults(
         fullscreen: false,
         insertMode: false,
         pointSelectMode: false,
-        selectedPointIndex: null,
+        selectedPointIndexes: () => [],
         showIntermediateMarkers: false,
+        splitMode: false,
         startNextSegment: false,
     },
 );
 
 const emit = defineEmits<{
     'point-inserted': [];
-    'point-selected': [index: number | null];
+    'point-selection-changed': [indexes: number[]];
+    'segment-split': [pointIndex: number];
     'update:fullscreen': [fullscreen: boolean];
     'update:points': [points: RoutePoint[]];
     'segment-started': [];
@@ -48,8 +51,23 @@ let insertLines: L.Polyline[] = [];
 let markers: L.Layer[] = [];
 let userMarker: L.CircleMarker | null = null;
 let accuracyCircle: L.Circle | null = null;
+let selectionRectangle: L.Rectangle | null = null;
+let selectionStart: L.LatLng | null = null;
+let selectionBase: number[] = [];
+let selectionDragged = false;
 let hasFittedRoute = false;
 const shouldFitInitialEditableRoute = props.editable && props.points.length > 0;
+
+const cancelBoxSelection = () => {
+    if (!selectionStart) {
+        return;
+    }
+
+    selectionRectangle?.remove();
+    selectionRectangle = null;
+    selectionStart = null;
+    selectionDragged = false;
+};
 
 const center = computed<LatLngExpression>(() => {
     if (props.points.length > 0) {
@@ -67,9 +85,11 @@ onMounted(async () => {
     }
 
     map = L.map(mapElement.value, {
+        boxZoom: false,
         maxZoom: MAX_ZOOM,
         zoomControl: false,
     }).setView(center.value, props.points.length > 0 ? 13 : 11);
+    mapElement.value.addEventListener('mouseleave', cancelBoxSelection);
 
     const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors',
@@ -118,7 +138,8 @@ onMounted(async () => {
 
     if (props.editable) {
         map.on('click', (event) => {
-            if (props.insertMode) {
+            if (props.insertMode || props.splitMode || props.pointSelectMode || selectionDragged) {
+                selectionDragged = false;
                 return;
             }
 
@@ -138,6 +159,58 @@ onMounted(async () => {
                 emit('segment-started');
             }
         });
+
+        map.on('mousedown', (event) => {
+            if (!props.pointSelectMode) {
+                return;
+            }
+
+            const originalEvent = event.originalEvent as MouseEvent;
+            selectionStart = event.latlng;
+            selectionDragged = false;
+            selectionBase = originalEvent.ctrlKey || originalEvent.metaKey
+                ? [...props.selectedPointIndexes]
+                : [];
+            selectionRectangle?.remove();
+            selectionRectangle = L.rectangle(L.latLngBounds(selectionStart, selectionStart), {
+                color: '#0f766e',
+                fillColor: '#14b8a6',
+                fillOpacity: 0.12,
+                interactive: false,
+                opacity: 0.9,
+                weight: 1.5,
+            }).addTo(map!);
+        });
+
+        map.on('mousemove', (event) => {
+            if (!selectionStart || !selectionRectangle) {
+                return;
+            }
+
+            selectionDragged = true;
+            selectionRectangle.setBounds(L.latLngBounds(selectionStart, event.latlng));
+        });
+
+        map.on('mouseup', (event) => {
+            if (!selectionStart) {
+                return;
+            }
+
+            const bounds = L.latLngBounds(selectionStart, event.latlng);
+            selectionRectangle?.remove();
+            selectionRectangle = null;
+            selectionStart = null;
+
+            if (!selectionDragged) {
+                return;
+            }
+
+            const withinBounds = props.points
+                .map((point, index) => bounds.contains([point.lat, point.lng]) ? index : -1)
+                .filter((index) => index >= 0);
+            emit('point-selection-changed', [...new Set([...selectionBase, ...withinBounds])]);
+        });
+
     }
 
     map.on('moveend zoomend', () => renderViewportRouteLayers());
@@ -173,6 +246,8 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+    mapElement.value?.removeEventListener('mouseleave', cancelBoxSelection);
+    selectionRectangle?.remove();
     map?.remove();
     map = null;
 });
@@ -184,13 +259,34 @@ watch(
 );
 
 watch(
-    () => props.insertMode,
+    () => [props.insertMode, props.splitMode],
     () => renderRoute(),
 );
 
 watch(
-    () => props.selectedPointIndex,
+    () => props.selectedPointIndexes,
     () => renderRoute(),
+    { deep: true },
+);
+
+watch(
+    () => props.pointSelectMode,
+    (enabled) => {
+        if (!map) {
+            return;
+        }
+
+        if (enabled) {
+            map.dragging.disable();
+        } else {
+            selectionRectangle?.remove();
+            selectionRectangle = null;
+            selectionStart = null;
+            map.dragging.enable();
+        }
+
+        renderRoute();
+    },
 );
 
 watch(
@@ -262,8 +358,8 @@ const renderRoute = () => {
         }).addTo(map!));
     });
 
-    if (props.editable && props.insertMode) {
-        renderInsertLines();
+    if (props.editable && (props.insertMode || props.splitMode)) {
+        renderInteractiveLines();
     }
 
     renderPointMarkers();
@@ -285,8 +381,8 @@ const renderViewportRouteLayers = () => {
 
     clearViewportRouteLayers();
 
-    if (props.editable && props.insertMode) {
-        renderInsertLines();
+    if (props.editable && (props.insertMode || props.splitMode)) {
+        renderInteractiveLines();
     }
 
     renderPointMarkers();
@@ -301,7 +397,7 @@ const clearViewportRouteLayers = () => {
 
 const renderPointMarkers = () => {
     props.points.forEach((point, index) => {
-        const isEndpoint = index === 0 || index === props.points.length - 1;
+        const isEndpoint = isSegmentEndpoint(index);
 
         if (!props.showIntermediateMarkers && !isEndpoint) {
             return;
@@ -320,14 +416,14 @@ const renderPointMarkers = () => {
 };
 
 const shouldRenderPoint = (point: RoutePoint, index: number, isEndpoint: boolean): boolean => {
-    if (!map || isEndpoint || props.selectedPointIndex === index) {
+    if (!map || isEndpoint || props.selectedPointIndexes.includes(index)) {
         return true;
     }
 
     return map.getBounds().pad(VIEWPORT_PADDING).contains([point.lat, point.lng]);
 };
 
-const renderInsertLines = () => {
+const renderInteractiveLines = () => {
     const visibleBounds = map!.getBounds().pad(VIEWPORT_PADDING);
 
     props.points.forEach((point, index) => {
@@ -348,21 +444,29 @@ const renderInsertLines = () => {
             return;
         }
 
-        const insertLine = L.polyline(
+        const interactiveLine = L.polyline(
             [
                 [previous.lat, previous.lng],
                 [point.lat, point.lng],
             ],
             {
-                color: '#2563eb',
+                color: props.splitMode ? '#dc2626' : '#2563eb',
                 opacity: 0,
                 weight: 24,
                 interactive: true,
             },
         ).addTo(map!);
 
-        insertLine.on('click', (event) => {
+        interactiveLine.on('mouseover', () => interactiveLine.setStyle({ opacity: 0.7, dashArray: props.splitMode ? '7 7' : undefined }));
+        interactiveLine.on('mouseout', () => interactiveLine.setStyle({ opacity: 0, dashArray: undefined }));
+        interactiveLine.on('click', (event) => {
             L.DomEvent.stop(event);
+
+            if (props.splitMode) {
+                emit('segment-split', index);
+                return;
+            }
+
             const insertedPoint: RoutePoint = {
                 lat: Number(event.latlng.lat.toFixed(7)),
                 lng: Number(event.latlng.lng.toFixed(7)),
@@ -375,10 +479,10 @@ const renderInsertLines = () => {
                 ...props.points.slice(index),
             ]);
             emit('point-inserted');
-            emit('point-selected', index);
+            emit('point-selection-changed', [index]);
         });
 
-        insertLines.push(insertLine);
+        insertLines.push(interactiveLine);
     });
 };
 
@@ -393,19 +497,25 @@ const readonlyPointMarker = (point: RoutePoint, index: number, isEndpoint: boole
 const editablePointMarker = (point: RoutePoint, index: number, isEndpoint: boolean): L.Marker => {
     const marker = L.marker([point.lat, point.lng], {
         bubblingMouseEvents: false,
-        draggable: true,
-        icon: pointIcon(pointColor(index), isEndpoint ? 14 : 11, props.selectedPointIndex === index),
+        draggable: !props.pointSelectMode && !props.insertMode && !props.splitMode,
+        icon: pointIcon(pointColor(index), isEndpoint ? 14 : 11, props.selectedPointIndexes.includes(index)),
         keyboard: false,
         title: `Точка ${index + 1}`,
     }).addTo(map!);
 
     marker.on('click', () => {
         if (props.pointSelectMode) {
-            emit('point-selected', props.selectedPointIndex === index ? null : index);
+            const selected = props.selectedPointIndexes.includes(index);
+            emit(
+                'point-selection-changed',
+                selected
+                    ? props.selectedPointIndexes.filter((selectedIndex) => selectedIndex !== index)
+                    : [...props.selectedPointIndexes, index],
+            );
             return;
         }
 
-        if (props.insertMode) {
+        if (props.insertMode || props.splitMode) {
             return;
         }
 
@@ -442,22 +552,38 @@ const editablePointMarker = (point: RoutePoint, index: number, isEndpoint: boole
         });
 
         emit('update:points', nextPoints);
-        emit('point-selected', index);
+        emit('point-selection-changed', [index]);
     });
 
     return marker;
 };
 
 const pointColor = (index: number): string => {
-    if (index === 0) {
+    const previousIsDifferent = index === 0 || pointSegment(props.points[index - 1]) !== pointSegment(props.points[index]);
+    const nextIsDifferent = index === props.points.length - 1 || pointSegment(props.points[index + 1]) !== pointSegment(props.points[index]);
+
+    if (previousIsDifferent && nextIsDifferent) {
+        return '#0f766e';
+    }
+
+    if (previousIsDifferent) {
         return '#16a34a';
     }
 
-    if (index === props.points.length - 1) {
+    if (nextIsDifferent) {
         return '#dc2626';
     }
 
     return '#2563eb';
+};
+
+const isSegmentEndpoint = (index: number): boolean => {
+    const point = props.points[index];
+
+    return index === 0
+        || index === props.points.length - 1
+        || pointSegment(props.points[index - 1]) !== pointSegment(point)
+        || pointSegment(props.points[index + 1]) !== pointSegment(point);
 };
 
 const pointIcon = (color: string, size: number, selected: boolean): L.DivIcon => L.divIcon({

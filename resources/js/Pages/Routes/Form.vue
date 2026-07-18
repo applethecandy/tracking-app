@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
+import Modal from '@/Components/Modal.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
+import RouteEditorToolbar from '@/Components/RouteEditorToolbar.vue';
 import RouteMap from '@/Components/RouteMap.vue';
 import TextInput from '@/Components/TextInput.vue';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import type { ActivityMap, RoutePoint, TrackRoute } from '@/types/routes';
-import { calculateDistance, formatDistance } from '@/utils/routeMetrics';
+import { connectEndpoints, endpointIndexes, moveEndpointToRouteEdge, normalizeSegments, splitSegmentBefore } from '@/utils/routeEditing';
+import { calculateDistance, formatDistance, pointSegment } from '@/utils/routeMetrics';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 
@@ -30,18 +33,37 @@ const isEditing = computed(() => props.routeModel !== null);
 const insertMode = ref(false);
 const mapFullscreen = ref(false);
 const pointSelectMode = ref(false);
+const splitMode = ref(false);
 const startNextSegment = ref(false);
-const selectedPointIndex = ref<number | null>(null);
+const continuingRoute = ref(false);
+const selectedPointIndexes = ref<number[]>([]);
 const undoStack = ref<RoutePoint[][]>([]);
 const gpxError = ref('');
+const showToolsHelp = ref(false);
 const canUndo = computed(() => undoStack.value.length > 0);
+const hasRouteLine = computed(() => form.points.some((point, index) =>
+    index > 0 && pointSegment(form.points[index - 1]) === pointSegment(point),
+));
+const routeEndpointIndexes = computed(() => endpointIndexes(form.points));
+const selectedEndpointIndexes = computed(() => selectedPointIndexes.value.filter((index) => routeEndpointIndexes.value.includes(index)));
+const canUseSelectedEndpoint = computed(() => selectedPointIndexes.value.length === 1 && selectedEndpointIndexes.value.length === 1);
+const canConnectSelectedEndpoints = computed(() => {
+    if (selectedPointIndexes.value.length !== 2 || selectedEndpointIndexes.value.length !== 2) {
+        return false;
+    }
+
+    const [first, second] = selectedEndpointIndexes.value;
+    return pointSegment(form.points[first]) !== pointSegment(form.points[second]);
+});
 
 const clonePoints = (points: RoutePoint[]): RoutePoint[] => points.map((point) => ({ ...point }));
 
 const resetMapModes = () => {
     insertMode.value = false;
     pointSelectMode.value = false;
+    splitMode.value = false;
     startNextSegment.value = false;
+    continuingRoute.value = false;
 };
 
 const applyPoints = (points: RoutePoint[], trackUndo = true) => {
@@ -52,9 +74,7 @@ const applyPoints = (points: RoutePoint[], trackUndo = true) => {
 
     form.points = points;
 
-    if (selectedPointIndex.value !== null && selectedPointIndex.value >= points.length) {
-        selectedPointIndex.value = null;
-    }
+    selectedPointIndexes.value = selectedPointIndexes.value.filter((index) => index < points.length);
 };
 
 const setPoints = (points: RoutePoint[]) => {
@@ -70,18 +90,20 @@ const undoChange = () => {
 
     form.points = clonePoints(previousPoints);
     resetMapModes();
-    selectedPointIndex.value = null;
+    selectedPointIndexes.value = [];
 };
 
 const clearPoints = () => {
     applyPoints([]);
     resetMapModes();
-    selectedPointIndex.value = null;
+    selectedPointIndexes.value = [];
 };
 
 const requestSegmentBreak = () => {
     insertMode.value = false;
     pointSelectMode.value = false;
+    splitMode.value = false;
+    continuingRoute.value = false;
     startNextSegment.value = true;
 };
 
@@ -89,29 +111,46 @@ const segmentBreakStarted = () => {
     startNextSegment.value = false;
 };
 
-const selectPoint = (index: number | null) => {
-    selectedPointIndex.value = index;
+const selectPoints = (indexes: number[]) => {
+    selectedPointIndexes.value = [...new Set(indexes)].filter((index) => index >= 0 && index < form.points.length);
 };
 
-const deleteSelectedPoint = () => {
-    if (selectedPointIndex.value === null) {
+const deleteSelectedPoints = () => {
+    if (selectedPointIndexes.value.length === 0) {
         return;
     }
 
-    applyPoints(form.points.filter((_, index) => index !== selectedPointIndex.value));
+    const selected = new Set(selectedPointIndexes.value);
+    applyPoints(normalizeSegments(form.points.filter((_, index) => !selected.has(index))));
     resetMapModes();
-    selectedPointIndex.value = null;
+    selectedPointIndexes.value = [];
 };
 
 const toggleInsertMode = () => {
     insertMode.value = !insertMode.value;
     pointSelectMode.value = false;
+    splitMode.value = false;
     startNextSegment.value = false;
-    selectedPointIndex.value = null;
+    continuingRoute.value = false;
+    selectedPointIndexes.value = [];
 };
 
 const pointInserted = () => {
     insertMode.value = false;
+};
+
+const toggleSplitMode = () => {
+    splitMode.value = !splitMode.value;
+    insertMode.value = false;
+    pointSelectMode.value = false;
+    startNextSegment.value = false;
+    continuingRoute.value = false;
+    selectedPointIndexes.value = [];
+};
+
+const splitSegment = (pointIndex: number) => {
+    applyPoints(splitSegmentBefore(form.points, pointIndex));
+    splitMode.value = false;
 };
 
 const setMapFullscreen = (fullscreen: boolean) => {
@@ -121,8 +160,53 @@ const setMapFullscreen = (fullscreen: boolean) => {
 const togglePointSelectMode = () => {
     pointSelectMode.value = !pointSelectMode.value;
     insertMode.value = false;
+    splitMode.value = false;
     startNextSegment.value = false;
-    selectedPointIndex.value = null;
+    continuingRoute.value = false;
+    selectedPointIndexes.value = [];
+};
+
+const continueFromEndpoint = (pointIndex?: number) => {
+    const targetIndex = pointIndex ?? selectedEndpointIndexes.value[0];
+    const points = moveEndpointToRouteEdge(form.points, targetIndex, 'end');
+
+    if (!points) {
+        return;
+    }
+
+    applyPoints(points);
+    insertMode.value = false;
+    pointSelectMode.value = false;
+    splitMode.value = false;
+    startNextSegment.value = false;
+    continuingRoute.value = true;
+    selectedPointIndexes.value = [];
+};
+
+const setRouteEdge = (edge: 'start' | 'end') => {
+    const targetIndex = selectedEndpointIndexes.value[0];
+    const points = moveEndpointToRouteEdge(form.points, targetIndex, edge);
+
+    if (!points) {
+        return;
+    }
+
+    applyPoints(points);
+    resetMapModes();
+    selectedPointIndexes.value = [];
+};
+
+const connectSelectedTracks = () => {
+    const [firstIndex, secondIndex] = selectedEndpointIndexes.value;
+    const points = connectEndpoints(form.points, firstIndex, secondIndex);
+
+    if (!points) {
+        return;
+    }
+
+    applyPoints(points);
+    resetMapModes();
+    selectedPointIndexes.value = [];
 };
 
 const importGpx = async (event: Event) => {
@@ -150,7 +234,7 @@ const importGpx = async (event: Event) => {
         form.activity_type = parsed.activityType || form.activity_type;
         applyPoints(parsed.points);
         resetMapModes();
-        selectedPointIndex.value = null;
+        selectedPointIndexes.value = [];
     } catch (error) {
         gpxError.value = error instanceof Error ? error.message : 'Не удалось прочитать GPX.';
     } finally {
@@ -410,12 +494,12 @@ const submit = () => {
                     </PrimaryButton>
                 </div>
 
-                <p v-if="selectedPointIndex !== null" class="text-sm text-gray-600">
-                    Выбрана точка {{ selectedPointIndex + 1 }}. Ее можно перетащить на карте или удалить кнопкой.
+                <p v-if="selectedPointIndexes.length" class="text-sm text-gray-600">
+                    Выбрано точек: {{ selectedPointIndexes.length }}. Конечных среди них: {{ selectedEndpointIndexes.length }}.
                 </p>
 
                 <p v-if="pointSelectMode" class="text-sm text-teal-700">
-                    Кликните по точке, чтобы выбрать ее для удаления. В обычном режиме клик по точке продолжает маршрут.
+                    Протяните рамку по карте или кликайте по точкам. Ctrl/Cmd добавляет рамку к текущему выбору.
                 </p>
 
                 <p v-if="startNextSegment" class="text-sm text-teal-700">
@@ -426,8 +510,16 @@ const submit = () => {
                     Кликните по отрезку маршрута, чтобы вставить точку между соседними точками.
                 </p>
 
-                <p v-else class="text-xs leading-5 text-gray-500">
-                    Для вставки точки кликните по нужному отрезку маршрута.
+                <p v-if="splitMode" class="text-sm text-red-700">
+                    Кликните по линии, которую нужно удалить. Трек будет разделён на два участка.
+                </p>
+
+                <p v-if="continuingRoute" class="text-sm text-teal-700">
+                    Продолжение включено. Добавляйте новые точки кликами по карте.
+                </p>
+
+                <p v-if="!insertMode && !splitMode && !pointSelectMode && !continuingRoute && !startNextSegment" class="text-xs leading-5 text-gray-500">
+                    Клик по карте или существующей точке добавляет новую точку маршрута. Для продолжения от другого конца используйте «Выделить» и «Продолжить».
                 </p>
             </section>
 
@@ -438,92 +530,43 @@ const submit = () => {
                     :points="form.points"
                     :insert-mode="insertMode"
                     :point-select-mode="pointSelectMode"
-                    :selected-point-index="selectedPointIndex"
+                    :selected-point-indexes="selectedPointIndexes"
+                    :split-mode="splitMode"
                     :start-next-segment="startNextSegment"
                     editable
                     show-intermediate-markers
                     @point-inserted="pointInserted"
-                    @point-selected="selectPoint"
+                    @point-selection-changed="selectPoints"
+                    @segment-split="splitSegment"
                     @segment-started="segmentBreakStarted"
                     @update:fullscreen="setMapFullscreen"
                     @update:points="setPoints"
                 />
 
-                <div class="absolute bottom-4 left-4 z-[1000] flex max-w-[calc(100vw-2rem)] flex-wrap gap-2 rounded-md bg-white/92 p-2 shadow-lg ring-1 ring-black/10 backdrop-blur">
-                    <button
-                        type="button"
-                        class="map-tool-button"
-                        :disabled="!canUndo"
-                        title="Отменить"
-                        aria-label="Отменить"
-                        @click="undoChange"
-                    >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M9 14l-4 -4l4 -4" />
-                            <path d="M5 10h10a4 4 0 1 1 0 8h-3" />
-                        </svg>
-                    </button>
-                    <button
-                        type="button"
-                        class="map-tool-button"
-                        :class="{ 'is-active': startNextSegment }"
-                        :disabled="form.points.length === 0 || startNextSegment"
-                        title="Разрыв"
-                        aria-label="Разрыв"
-                        @click="requestSegmentBreak"
-                    >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M4 12h6" />
-                            <path d="M14 12h6" />
-                            <path d="M10 8l4 8" />
-                            <path d="M14 8l-4 8" />
-                        </svg>
-                    </button>
-                    <button
-                        type="button"
-                        class="map-tool-button"
-                        :class="{ 'is-active': insertMode }"
-                        :disabled="form.points.length < 2"
-                        title="Вставить точку"
-                        aria-label="Вставить точку"
-                        @click="toggleInsertMode"
-                    >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M5 12h14" />
-                            <path d="M12 5v14" />
-                        </svg>
-                    </button>
-                    <button
-                        type="button"
-                        class="map-tool-button"
-                        :class="{ 'is-active': pointSelectMode }"
-                        :disabled="form.points.length === 0"
-                        title="Выбрать точку"
-                        aria-label="Выбрать точку"
-                        @click="togglePointSelectMode"
-                    >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M7 4l10 7l-5 1l-2 5l-3 -13z" />
-                            <circle cx="17" cy="17" r="3" />
-                        </svg>
-                    </button>
-                    <button
-                        type="button"
-                        class="map-tool-button"
-                        :disabled="selectedPointIndex === null"
-                        title="Удалить выбранную"
-                        aria-label="Удалить выбранную"
-                        @click="deleteSelectedPoint"
-                    >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M4 7h16" />
-                            <path d="M10 11v6" />
-                            <path d="M14 11v6" />
-                            <path d="M5 7l1 13h12l1 -13" />
-                            <path d="M9 7V4h6v3" />
-                        </svg>
-                    </button>
-                </div>
+                <RouteEditorToolbar
+                    class="absolute bottom-4 left-4 z-[1000] max-w-[calc(100%-2rem)]"
+                    :can-undo="canUndo"
+                    :has-points="form.points.length > 0"
+                    :has-line="hasRouteLine"
+                    :insert-mode="insertMode"
+                    :split-mode="splitMode"
+                    :select-mode="pointSelectMode"
+                    :new-segment-mode="startNextSegment"
+                    :selected-count="selectedPointIndexes.length"
+                    :can-use-endpoint="canUseSelectedEndpoint"
+                    :can-connect="canConnectSelectedEndpoints"
+                    @undo="undoChange"
+                    @new-segment="requestSegmentBreak"
+                    @insert="toggleInsertMode"
+                    @split="toggleSplitMode"
+                    @select="togglePointSelectMode"
+                    @delete="deleteSelectedPoints"
+                    @continue="continueFromEndpoint()"
+                    @set-start="setRouteEdge('start')"
+                    @set-end="setRouteEdge('end')"
+                    @connect="connectSelectedTracks"
+                    @help="showToolsHelp = true"
+                />
             </section>
         </form>
 
@@ -534,12 +577,14 @@ const submit = () => {
                     :points="form.points"
                     :insert-mode="insertMode"
                     :point-select-mode="pointSelectMode"
-                    :selected-point-index="selectedPointIndex"
+                    :selected-point-indexes="selectedPointIndexes"
+                    :split-mode="splitMode"
                     :start-next-segment="startNextSegment"
                     editable
                     show-intermediate-markers
                     @point-inserted="pointInserted"
-                    @point-selected="selectPoint"
+                    @point-selection-changed="selectPoints"
+                    @segment-split="splitSegment"
                     @segment-started="segmentBreakStarted"
                     @update:fullscreen="setMapFullscreen"
                     @update:points="setPoints"
@@ -552,119 +597,127 @@ const submit = () => {
                     </div>
                 </div>
 
-                <div class="absolute bottom-4 left-4 z-[1000] flex max-w-[calc(100vw-2rem)] flex-wrap gap-2 rounded-md bg-white/92 p-2 shadow-lg ring-1 ring-black/10 backdrop-blur">
-                    <button
-                        type="button"
-                        class="map-tool-button"
-                        :disabled="!canUndo"
-                        title="Отменить"
-                        aria-label="Отменить"
-                        @click="undoChange"
-                    >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M9 14l-4 -4l4 -4" />
-                            <path d="M5 10h10a4 4 0 1 1 0 8h-3" />
-                        </svg>
-                    </button>
-                    <button
-                        type="button"
-                        class="map-tool-button"
-                        :class="{ 'is-active': startNextSegment }"
-                        :disabled="form.points.length === 0 || startNextSegment"
-                        title="Разрыв"
-                        aria-label="Разрыв"
-                        @click="requestSegmentBreak"
-                    >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M4 12h6" />
-                            <path d="M14 12h6" />
-                            <path d="M10 8l4 8" />
-                            <path d="M14 8l-4 8" />
-                        </svg>
-                    </button>
-                    <button
-                        type="button"
-                        class="map-tool-button"
-                        :class="{ 'is-active': insertMode }"
-                        :disabled="form.points.length < 2"
-                        title="Вставить точку"
-                        aria-label="Вставить точку"
-                        @click="toggleInsertMode"
-                    >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M5 12h14" />
-                            <path d="M12 5v14" />
-                        </svg>
-                    </button>
-                    <button
-                        type="button"
-                        class="map-tool-button"
-                        :class="{ 'is-active': pointSelectMode }"
-                        :disabled="form.points.length === 0"
-                        title="Выбрать точку"
-                        aria-label="Выбрать точку"
-                        @click="togglePointSelectMode"
-                    >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M7 4l10 7l-5 1l-2 5l-3 -13z" />
-                            <circle cx="17" cy="17" r="3" />
-                        </svg>
-                    </button>
-                    <button
-                        type="button"
-                        class="map-tool-button"
-                        :disabled="selectedPointIndex === null"
-                        title="Удалить выбранную"
-                        aria-label="Удалить выбранную"
-                        @click="deleteSelectedPoint"
-                    >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M4 7h16" />
-                            <path d="M10 11v6" />
-                            <path d="M14 11v6" />
-                            <path d="M5 7l1 13h12l1 -13" />
-                            <path d="M9 7V4h6v3" />
-                        </svg>
-                    </button>
-                </div>
+                <RouteEditorToolbar
+                    class="absolute bottom-4 left-4 z-[1000] max-w-[calc(100%-2rem)]"
+                    :can-undo="canUndo"
+                    :has-points="form.points.length > 0"
+                    :has-line="hasRouteLine"
+                    :insert-mode="insertMode"
+                    :split-mode="splitMode"
+                    :select-mode="pointSelectMode"
+                    :new-segment-mode="startNextSegment"
+                    :selected-count="selectedPointIndexes.length"
+                    :can-use-endpoint="canUseSelectedEndpoint"
+                    :can-connect="canConnectSelectedEndpoints"
+                    @undo="undoChange"
+                    @new-segment="requestSegmentBreak"
+                    @insert="toggleInsertMode"
+                    @split="toggleSplitMode"
+                    @select="togglePointSelectMode"
+                    @delete="deleteSelectedPoints"
+                    @continue="continueFromEndpoint()"
+                    @set-start="setRouteEdge('start')"
+                    @set-end="setRouteEdge('end')"
+                    @connect="connectSelectedTracks"
+                    @help="showToolsHelp = true"
+                />
             </div>
         </Teleport>
+
+        <Modal :show="showToolsHelp" max-width="lg" @close="showToolsHelp = false">
+            <div class="p-6 sm:p-7">
+                <div class="flex items-start justify-between gap-4 border-b border-gray-200 pb-4">
+                    <div>
+                        <h2 class="text-lg font-semibold text-gray-900">Инструменты карты</h2>
+                        <p class="mt-1 text-sm text-gray-500">Краткая памятка по редактированию трека.</p>
+                    </div>
+                    <button type="button" class="help-close-button" aria-label="Закрыть справку" @click="showToolsHelp = false">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                    </button>
+                </div>
+
+                <dl class="help-list">
+                    <div><dt>Отменить</dt><dd>Возвращает состояние точек до последнего изменения. Доступно до 100 шагов.</dd></div>
+                    <div><dt>Новый участок</dt><dd>Следующий клик по карте начинает отдельный участок без соединительной линии.</dd></div>
+                    <div><dt>Вставить точку</dt><dd>Нажмите инструмент, затем кликните по линии между соседними точками.</dd></div>
+                    <div><dt>Разделить трек</dt><dd>Нажмите на линию, которую нужно удалить. Один участок станет двумя.</dd></div>
+                    <div><dt>Выделить</dt><dd>Протяните рамку вокруг точек или выбирайте их кликами. Ctrl/Cmd сохраняет прежний выбор при выделении рамкой.</dd></div>
+                    <div><dt>Удалить</dt><dd>Удаляет все выбранные точки одним действием.</dd></div>
+                    <div><dt>Продолжить</dt><dd>В режиме выделения выберите одну конечную точку, нажмите этот инструмент и продолжайте маршрут кликами по карте.</dd></div>
+                    <div><dt>Сделать началом / концом</dt><dd>Перестраивает направление и порядок участков так, чтобы выбранная конечная точка стала началом или концом всего маршрута.</dd></div>
+                    <div><dt>Соединить</dt><dd>Выберите две конечные точки разных участков. Участки развернутся при необходимости и соединятся линией.</dd></div>
+                </dl>
+
+                <div class="mt-5 rounded-md bg-teal-50 px-4 py-3 text-sm leading-6 text-teal-900">
+                    Начала участков отмечены зелёным, концы — красным. Одиночный участок без линии отмечается бирюзовым.
+                </div>
+            </div>
+        </Modal>
     </AuthenticatedLayout>
 </template>
 
 <style scoped>
-.map-tool-button {
+.help-close-button {
     display: flex;
+    flex: 0 0 36px;
     align-items: center;
     justify-content: center;
-    width: 42px;
-    height: 42px;
-    color: #111827;
-    background: #ffffff;
+    width: 36px;
+    height: 36px;
+    color: #4b5563;
     border: 1px solid #d1d5db;
     border-radius: 6px;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+    transition: transform 160ms ease, color 160ms ease, border-color 160ms ease, background-color 160ms ease;
 }
 
-.map-tool-button svg {
-    width: 21px;
-    height: 21px;
+.help-close-button svg {
+    width: 18px;
+    height: 18px;
     fill: none;
     stroke: currentColor;
-    stroke-width: 2;
+    stroke-width: 1.8;
     stroke-linecap: round;
     stroke-linejoin: round;
 }
 
-.map-tool-button:hover:not(:disabled),
-.map-tool-button.is-active {
+.help-close-button:hover {
     color: #0f766e;
     background: #ecfdf5;
     border-color: #0f766e;
 }
 
-.map-tool-button:disabled {
-    cursor: not-allowed;
-    opacity: 0.42;
+.help-close-button:active {
+    transform: scale(0.98);
+}
+
+.help-list {
+    margin-top: 6px;
+}
+
+.help-list > div {
+    display: grid;
+    grid-template-columns: minmax(120px, 0.65fr) minmax(0, 1.8fr);
+    gap: 20px;
+    padding: 13px 0;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.help-list dt {
+    color: #111827;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.help-list dd {
+    color: #4b5563;
+    font-size: 14px;
+    line-height: 1.55;
+}
+
+@media (max-width: 639px) {
+    .help-list > div {
+        grid-template-columns: 1fr;
+        gap: 4px;
+    }
 }
 </style>
